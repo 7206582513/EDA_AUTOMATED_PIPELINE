@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>InsightForge.AI - AutoML Uploader</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f4f6fa;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      background: #ffffff;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+      width: 450px;
+      text-align: center;
+    }
+    h1 {
+      color: #4B49AC;
+      margin-bottom: 10px;
+    }
+    p {
+      color: #555;
+      font-size: 15px;
+      margin-bottom: 25px;
+    }
+    input[type="file"] {
+      margin: 15px 0;
+      padding: 10px;
+    }
+    button {
+      background: #4B49AC;
+      color: #fff;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+    button:hover {
+      background: #393794;
+    }
+    footer {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #999;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>InsightForge.AI</h1>
+    <p>Upload your CSV file to get a full EDA and best model trained automatically.</p>
+
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".csv" required>
+      <br>
+      <button type="submit">🚀 Start AutoML</button>
+    </form>
+
+    <footer>
+      <p>Built with ❤️ by InsightForge.AI</p>
+    </footer>
+  </div>
+
+</body>
+</html>
