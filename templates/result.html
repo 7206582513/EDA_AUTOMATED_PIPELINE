@@ -5,111 +5,117 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      padding: 20px;
-      background-color: #f4f4f4;
-    }
-    h2, h3, h4 {
+      background-color: #f7f8fa;
+      padding: 30px;
       color: #333;
-    }
-    img {
-      margin: 20px 0;
-      border: 1px solid #ccc;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      width: 600px;
     }
     .report-box {
       background: #fff;
-      padding: 15px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      padding: 25px;
+      border-radius: 10px;
+      max-width: 800px;
+      margin: auto;
+      box-shadow: 0 0 15px rgba(0,0,0,0.1);
     }
-    a.button {
-      display: inline-block;
+    h2, h3 {
+      color: #4B49AC;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 25px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: center;
+    }
+    th {
+      background-color: #f4f4f4;
+    }
+    .buttons {
+      margin-top: 20px;
+    }
+    .button {
       padding: 10px 20px;
-      background: #4B49AC;
+      margin-right: 15px;
+      background-color: #4B49AC;
       color: white;
       text-decoration: none;
       border-radius: 5px;
-      margin-right: 10px;
+    }
+    img {
+      margin-top: 20px;
+      max-width: 100%;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
     }
     pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      background: #fff;
+      background: #f1f1f1;
       padding: 10px;
-      border-radius: 8px;
-    }
-    table {
-      border-collapse: collapse;
-      margin-top: 20px;
-      background-color: white;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-    table, th, td {
-      border: 1px solid #aaa;
-    }
-    th, td {
-      padding: 10px;
-      text-align: center;
+      border-radius: 5px;
+      overflow-x: auto;
     }
   </style>
 </head>
 <body>
 
-  <h2>🧠 AutoML Analysis Results</h2>
-
   <div class="report-box">
-    <h3>✅ Best Model: {{ report["Best Model"] }}</h3>
-    <h4>📊 {{ "Accuracy" if report["Task Type"] == "classification" else "R² Score" }}: {{ report["Best Score"] }}</h4>
+    <h2>📊 AutoML Report</h2>
+    <h3>✅ Best Model: {{ report['Best Model'] }}</h3>
 
-    {% if report["Evaluation Report"] %}
-      <h4>📄 Evaluation Report:</h4>
-      <pre>{{ report["Evaluation Report"] | tojson(indent=2) }}</pre>
+    {% if report['Task Type'] == 'classification' %}
+      <p>🎯 Accuracy: {{ report['Best Score'] }}%</p>
+      <h4>📄 Classification Report:</h4>
+      <pre>{{ report['Evaluation Report'] | tojson(indent=2) }}</pre>
     {% else %}
-      <p><i>No evaluation report available.</i></p>
+      <p>📈 R² Score: {{ report['Best Score'] }}</p>
+      <h4>📄 Regression Metrics:</h4>
+      <pre>{{ report['Evaluation Report'] | tojson(indent=2) }}</pre>
     {% endif %}
 
-    {% if report["Plot Path"] %}
-      <h4>📌 {{ "Confusion Matrix" if report["Task Type"] == "classification" else "Regression Plot" }}</h4>
-      <img src="{{ '/' + report['Plot Path'] }}" alt="Evaluation Plot">
+    {% if report['Plot Path'] %}
+      <h4>🔍 {{ 'Confusion Matrix' if report['Task Type'] == 'classification' else 'Regression Plot' }}:</h4>
+      <img src="{{ url_for('static', filename=report['Plot Path'].split('static/')[1]) }}" alt="Evaluation Plot">
     {% endif %}
+
+    {% if report['Comparison Table'] %}
+      <h4>📊 Model Comparison:</h4>
+      <table>
+        <thead>
+          {% if report['Task Type'] == 'classification' %}
+            <tr>
+              <th>Model</th>
+              <th>Accuracy</th>
+              <th>Macro F1</th>
+              <th>Confusion Matrix</th>
+            </tr>
+          {% else %}
+            <tr>
+              <th>Model</th>
+              <th>R² Score</th>
+              <th>MSE</th>
+              <th>Regression Plot</th>
+            </tr>
+          {% endif %}
+        </thead>
+        <tbody>
+          {% for row in report['Comparison Table'] %}
+            <tr>
+              {% for val in row.values() %}
+                <td>{{ val }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <div class="buttons">
+      <a href="/download" class="button">⬇️ Download Cleaned CSV</a>
+      <a href="/download_pdf" class="button">📄 Download PDF Report</a>
+    </div>
   </div>
-
-  <a href="/download" class="button">⬇️ Download Cleaned Data</a>
-  <a href="/download_pdf" class="button">📄 Download EDA PDF Report</a>
-
-  {% if report["Comparison Table"] %}
-    <h3>📊 Model Comparison Table</h3>
-    <table>
-      <tr>
-        <th>Model</th>
-        {% if report["Task Type"] == "classification" %}
-          <th>Accuracy (%)</th>
-          <th>F1 Score (Macro)</th>
-          <th>Confusion Matrix</th>
-        {% else %}
-          <th>R² Score</th>
-          <th>MSE</th>
-          <th>Regression Plot</th>
-        {% endif %}
-      </tr>
-      {% for row in report["Comparison Table"] %}
-      <tr>
-        <td>{{ row["Model"] }}</td>
-        {% if report["Task Type"] == "classification" %}
-          <td>{{ row.get("Accuracy", "-") }}</td>
-          <td>{{ row.get("Macro F1", "-") }}</td>
-          <td><img src="{{ '/' + row['Confusion Matrix'] }}" width="200" alt="CM"></td>
-        {% else %}
-          <td>{{ row.get("R2 Score", "-") }}</td>
-          <td>{{ row.get("MSE", "-") }}</td>
-          <td><img src="{{ '/' + row['Regression Plot'] }}" width="200" alt="RegPlot"></td>
-        {% endif %}
-      </tr>
-      {% endfor %}
-    </table>
-  {% endif %}
 
 </body>
 </html>

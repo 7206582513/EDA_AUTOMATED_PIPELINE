@@ -1,9 +1,37 @@
-# ✅ universal_eda_pipeline.py (Final Fix for IQR Outlier Removal)
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
+import numpy as np
+from sklearn.preprocessing import LabelEncoder, OrdinalEncoder, StandardScaler
+from sklearn.impute import KNNImputer
 from sklearn.feature_selection import chi2
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-import numpy as np
+from modules.plot_utils import generate_charts
+from modules.pdf_generator import generate_pdf_from_charts
+
+
+def knn_impute(df, n_neighbors=5):
+    cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+    df_encoded = df.copy()
+    if cat_cols:
+        df_encoded[cat_cols] = encoder.fit_transform(df[cat_cols].astype(str))
+    imputer = KNNImputer(n_neighbors=n_neighbors)
+    df_array = imputer.fit_transform(df_encoded)
+    df_imputed = pd.DataFrame(df_array, columns=df.columns)
+    if cat_cols:
+        df_imputed[cat_cols] = df_imputed[cat_cols].round().astype(int)
+        df_imputed[cat_cols] = encoder.inverse_transform(df_imputed[cat_cols])
+    return df_imputed
+
+
+def clean_numeric_columns(df):
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            temp = df[col].astype(str)
+            temp = temp.str.replace(r"[₹,kKmMsS\sa-zA-Z:]+", "", regex=True)
+            numeric = pd.to_numeric(temp, errors='coerce')
+            if numeric.notnull().mean() > 0.6:
+                df[col] = numeric
+    return df
 
 
 def calculate_vif(df):
@@ -13,82 +41,88 @@ def calculate_vif(df):
     return vif_data[vif_data['VIF'] > 5]['feature'].tolist()
 
 
-def auto_eda_pipeline(df):
-    eda_report = {}
+def auto_eda_pipeline(df, task_type="classification", target_col=None):
+    report = {}
 
-    # Step 1: Drop ID-like columns
-    drop_cols = [col for col in df.columns if 'id' in col.lower() or 'number' in col.lower()]
-    df.drop(columns=drop_cols, inplace=True, errors='ignore')
+    # Step 1: Clean column names
+    df.columns = df.columns.str.strip()
 
-    # Step 2: Remove high-cardinality categoricals
-    for col in df.select_dtypes(include='object'):
-        if df[col].nunique() > 100:
-            df.drop(columns=[col], inplace=True)
+    # Step 2: Drop high-null and ID-like columns
+    df = df.drop(columns=[col for col in df.columns if 'id' in col.lower() or 'number' in col.lower()], errors='ignore')
+    df = df.dropna(axis=1, thresh=int(0.6 * len(df)))
 
-    # Step 3: Handle missing values
-    for col in df.columns:
-        if df[col].dtype in ['float64', 'int64']:
-            df[col].fillna(df[col].median(), inplace=True)
-        else:
-            df[col].fillna(df[col].mode()[0], inplace=True)
+    # Step 3: Convert dirty strings to numbers where possible
+    df = clean_numeric_columns(df)
 
-    # Step 4: Detect target column
-    target = None
-    for col in df.columns[::-1]:
-        if df[col].nunique() <= 10 and df[col].dtype in ['int64', 'float64']:
-            target = col
-            break
-    if not target:
-        target = df.columns[-1]
+    # Step 4: Impute missing values
+    df = knn_impute(df)
 
-    y = df[target]
-    X = df.drop(columns=[target])
+    # Step 5: Select target column
+    if not target_col or target_col not in df.columns:
+        raise ValueError(f"❌ Target column '{target_col}' not found in dataset.")
+    y = df[target_col]
+    X = df.drop(columns=[target_col])
 
-    # Step 5: Smart Encoding
+    # Step 6: Encode features
     for col in X.select_dtypes(include='object').columns:
         if X[col].nunique() <= 10:
             X = pd.get_dummies(X, columns=[col], drop_first=True)
         else:
-            le = LabelEncoder()
-            X[col] = le.fit_transform(X[col])
+            X[col] = LabelEncoder().fit_transform(X[col])
 
-    # Step 6: Chi-Square for categorical relevance (only if classification)
+    # Step 7: Encode target if classification
+    if task_type == "classification" and y.dtype == 'object':
+        y = LabelEncoder().fit_transform(y)
+
+    # Step 8: Standard Scaling
+    scaler = StandardScaler()
+    X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
+
+    # Step 9: Chi2 feature removal (classification only)
     chi2_removed = []
-    if y.nunique() <= 10:
-        for col in X.select_dtypes(include='uint8').columns:
-            stat, p = chi2(X[[col]], y)
-            if p[0] > 0.05:
-                chi2_removed.append(col)
-                X.drop(columns=[col], inplace=True)
+    if task_type == "classification":
+        for col in X_scaled.select_dtypes(include='float64').columns:
+            try:
+                stat, p = chi2(X_scaled[[col]], y)
+                if p[0] > 0.05:
+                    chi2_removed.append(col)
+                    X_scaled.drop(columns=[col], inplace=True)
+            except:
+                continue
 
-    # Step 7: VIF for numeric features
-    numeric_cols = X.select_dtypes(include=['float64', 'int64']).columns
-    high_vif = calculate_vif(X[numeric_cols])
-    X.drop(columns=high_vif, inplace=True)
+    # Step 10: VIF-based multicollinearity removal
+    vif_cols = calculate_vif(X_scaled)
+    X_scaled.drop(columns=vif_cols, inplace=True)
 
-    # Step 8: Remove outliers using IQR (only numeric columns)
-    numeric_only = X.select_dtypes(include=["float64", "int64"])
-    Q1 = numeric_only.quantile(0.25)
-    Q3 = numeric_only.quantile(0.75)
+    # Step 11: Outlier removal using IQR
+    Q1 = X_scaled.quantile(0.25)
+    Q3 = X_scaled.quantile(0.75)
     IQR = Q3 - Q1
+    lower = Q1 - 1.5 * IQR
+    upper = Q3 + 1.5 * IQR
+    mask = ~((X_scaled < lower) | (X_scaled > upper)).any(axis=1)
+    X_clean = X_scaled[mask]
+    y_clean = y.loc[mask]
 
-    lower_bound = Q1 - 1.5 * IQR
-    upper_bound = Q3 + 1.5 * IQR
-    is_outlier = ((numeric_only < lower_bound) | (numeric_only > upper_bound)).any(axis=1)
-    non_outliers = ~is_outlier
+    # Final cleaned DataFrame
+    final_df = pd.concat([X_clean.reset_index(drop=True), y_clean.reset_index(drop=True)], axis=1)
 
-    X_cleaned = X[non_outliers]
-    y_cleaned = y[non_outliers]
+    # 🚨 Final NaN removal
+    final_df = final_df.dropna()
 
-    df_processed = pd.concat([X_cleaned, y_cleaned], axis=1)
+    # Step 12: Generate charts and PDF
+    charts = generate_charts(final_df)
+    pdf_path = generate_pdf_from_charts(charts)
 
-    eda_report['outliers_removed'] = int(df.shape[0] - non_outliers.sum())
-    eda_report['drop_cols'] = drop_cols
-    eda_report['target'] = target
-    eda_report['chi2_removed'] = chi2_removed
-    eda_report['high_vif_removed'] = high_vif
-    eda_report['shape_before'] = df.shape
-    eda_report['shape_after'] = df_processed.shape
-    eda_report['missing_handled'] = True
+    # Report summary
+    report['task'] = task_type
+    report['target'] = target_col
+    report['shape_before'] = df.shape
+    report['shape_after'] = final_df.shape
+    report['outliers_removed'] = int(df.shape[0] - final_df.shape[0])
+    report['chi2_removed'] = chi2_removed
+    report['vif_removed'] = vif_cols
+    report['charts'] = charts
+    report['pdf'] = pdf_path
 
-    return df_processed, eda_report
+    return final_df, report
